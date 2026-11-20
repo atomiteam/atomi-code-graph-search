@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import time
+import psutil
 
 from local_index import connect, index, search
 
@@ -52,15 +53,7 @@ def pid_file(db_path):
 
 
 def running_pid(db_path):
-    path = pid_file(db_path)
-    try:
-        pid = int(path.read_text().strip())
-        argv = Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace').split('\0')
-        if '-m' in argv and 'cli' in argv and '_serve' in argv and str(Path(db_path).expanduser().resolve()) in argv:
-            return pid
-    except (FileNotFoundError, ValueError, PermissionError, ProcessLookupError):
-        pass
-    return None
+    return managed_pid(db_path, 'mcp')
 
 
 def start_mcp(db_path, port):
@@ -103,11 +96,11 @@ def managed_pid(db_path, service):
     path = web_pid_file(db_path) if service == 'web' else pid_file(db_path)
     try:
         pid = int(path.read_text())
-        argv = Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace').split('\0')
+        argv = psutil.Process(pid).cmdline()
         marker = '_webserve' if service == 'web' else '_serve'
         if '-m' in argv and 'cli' in argv and marker in argv and str(Path(db_path).expanduser().resolve()) in argv:
             return pid
-    except (FileNotFoundError, ValueError, PermissionError, ProcessLookupError):
+    except (FileNotFoundError, ValueError, PermissionError, psutil.Error):
         pass
     return None
 

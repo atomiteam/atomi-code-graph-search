@@ -1,5 +1,5 @@
 """Local dashboard with asynchronous indexing and no external assets."""
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -26,14 +26,20 @@ class Dashboard(ThreadingHTTPServer):
         def task():
             for path in paths:
                 with self.lock:
-                    self.jobs[path] = {'status': 'indexing', 'detail': 'Scanning files…'}
+                    self.jobs[path] = {'status': 'starting', 'detail': 'Opening index…', 'processed': 0, 'total': 0, 'counts': {}}
+                def report(phase, processed, total, counts):
+                    with self.lock:
+                        self.jobs[path] = {
+                            'status': phase, 'detail': '', 'processed': processed,
+                            'total': total, 'counts': counts,
+                        }
                 try:
                     with self.operation_lock:
                         with connect(self.db_path) as db:
                             registered = db.execute('SELECT 1 FROM repositories WHERE path=?', (path,)).fetchone()
                             if not registered:
                                 continue
-                            result = index(db, [path], self.db_path)
+                            result = index(db, [path], self.db_path, progress=report)
                     value = {'status': 'ready', 'detail': ', '.join(f'{k}: {v}' for k, v in result.items())}
                 except Exception as exc:
                     value = {'status': 'error', 'detail': str(exc)}
@@ -42,7 +48,18 @@ class Dashboard(ThreadingHTTPServer):
         with self.lock:
             for path in paths:
                 self.jobs[path] = {'status': 'queued', 'detail': 'Waiting to index…'}
-        self.pool.submit(task)
+        future = self.pool.submit(task)
+        def handle_failure(done):
+            try:
+                error = done.exception()
+            except CancelledError:
+                error = RuntimeError('Indexing was cancelled when the web server stopped')
+            if error:
+                with self.lock:
+                    for path in paths:
+                        if self.jobs.get(path, {}).get('status') not in ('ready', 'error'):
+                            self.jobs[path] = {'status': 'error', 'detail': str(error)}
+        future.add_done_callback(handle_failure)
 
     def server_close(self):
         self.pool.shutdown(wait=False, cancel_futures=True)
@@ -104,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
         matches = ''.join(f'<li><strong>{escape(r["path"])}:{r["line"]}</strong><pre>{escape(r["snippet"])}</pre></li>' for r in results)
         page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Atomi Code Graph Search</title><style>
 :root{font-family:system-ui,sans-serif;color:#243047;background:#f6f8fb}*{box-sizing:border-box}main{max-width:1050px;margin:auto;padding:30px 18px}h1{margin-bottom:4px}p{color:#64748b}section{background:white;border:1px solid #e3e8f0;border-radius:14px;padding:22px;margin:22px 0;box-shadow:0 3px 14px #1d355708}form.inline,td form{display:inline-block;margin-right:6px}input{border:1px solid #cbd5e1;border-radius:8px;padding:10px;font:inherit;width:min(100%,540px)}button{border:0;border-radius:8px;background:#286ad1;color:white;padding:10px 15px;cursor:pointer;font-weight:600}.subtle{background:#e7edf5;color:#334155}table{border-collapse:collapse;width:100%}td,th{text-align:left;border-bottom:1px solid #edf1f5;padding:13px 8px;vertical-align:middle}td small{display:block;color:#64748b;word-break:break-all}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f7f9fc;padding:12px;border-radius:7px}li{margin:15px 0;overflow-wrap:anywhere}@media(max-width:700px){td{display:block}thead{display:none}tr{display:block;border-bottom:1px solid #ddd}}
-</style><main><h1>Atomi Code Graph Search</h1><p>Browse and refresh code on this machine. <a href='/graph'>Explore source graph →</a></p><section><h2>Repositories</h2><form method="post" action="/add"><label for="path">Repository directory</label><br><input required id="path" name="path" placeholder="/home/me/projects/my-repo"> <button>Add and index</button></form><p>Enter a directory accessible to this computer.</p><form method="post" action="/refresh-all"><button class="subtle">Refresh all</button></form><table><thead><tr><th>Repository</th><th>Index status</th><th>Actions</th></tr></thead><tbody>''' + (rows or '<tr><td colspan="3">No repositories added yet.</td></tr>') + '''</tbody></table></section><section><h2>Search code</h2><form method="get" action="/"><input name="q" value="''' + escape(query, quote=True) + '''" placeholder="Class, endpoint, SQL table…"> <button>Search</button></form><ul>''' + matches + '''</ul></section></main><script>async function status(){try{const r=await fetch('/api/status');if(!r.ok)return;const data=await r.json();for(const x of data){for(const el of document.querySelectorAll('.state'))if(el.dataset.path===x.path)el.textContent=x.status+' · '+x.files+' files'+(x.detail?' · '+x.detail:'')}}catch(e){}}status();setInterval(status,1500)</script></html>'''
+</style><main><h1>Atomi Code Graph Search</h1><p>Browse and refresh code on this machine. <a href='/graph'>Explore source graph →</a></p><section><h2>Repositories</h2><form method="post" action="/add"><label for="path">Repository directory</label><br><input required id="path" name="path" placeholder="C:\\dev\\repo\\my-repo"> <button>Add and index</button></form><p>Enter a directory accessible to this computer.</p><form method="post" action="/refresh-all"><button class="subtle">Refresh all</button></form><table><thead><tr><th>Repository</th><th>Index status</th><th>Actions</th></tr></thead><tbody>''' + (rows or '<tr><td colspan="3">No repositories added yet.</td></tr>') + '''</tbody></table></section><section><h2>Search code</h2><form method="get" action="/"><input name="q" value="''' + escape(query, quote=True) + '''" placeholder="Class, endpoint, SQL table…"> <button>Search</button></form><ul>''' + matches + '''</ul></section></main><script>async function status(){try{const r=await fetch('/api/status');if(!r.ok)return;const data=await r.json();for(const x of data){for(const el of document.querySelectorAll('.state'))if(el.dataset.path===x.path){const counts=x.counts||{};let detail=x.detail||'';if(x.status==='discovering')detail=x.processed+' files found';if(x.status==='indexing'||x.status==='building graph')detail=x.processed+' / '+x.total+' files · '+(x.total?Math.floor(100*x.processed/x.total):0)+'% · '+(counts.updated||0)+' updated · '+(counts.unchanged||0)+' unchanged';el.textContent=x.status+' · '+detail+(x.status==='ready'?' · '+x.files+' indexed files':'');}}}catch(e){}}status();setInterval(status,1500)</script></html>'''
         self._send(200, page, 'text/html; charset=utf-8')
 
     def do_POST(self):

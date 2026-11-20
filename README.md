@@ -37,7 +37,7 @@ atomi-code-graph-search web status
 atomi-code-graph-search web stop
 ```
 
-Use `atomi-code-graph-search web start --port 9000` for another port, or `atomi-code-graph-search web run` to run in the foreground. The page lets you add a repository by its local directory path, see file counts and queued/indexing/ready/error states, refresh one or all repositories, remove registrations, and search code. Indexing happens in a background queue; status updates automatically. Refresh the page for new search results after indexing finishes.
+Use `atomi-code-graph-search web start --port 9000` for another port, or `atomi-code-graph-search web run` to run in the foreground. The page lets you add a repository by its local directory path, see file counts and queued/indexing/ready/error states, refresh one or all repositories, remove registrations, and search code. Indexing happens in a background queue; the page shows files discovered, indexing progress, and graph construction progress. Refresh the page for new search results after indexing finishes. After upgrading, restart an already running dashboard with `atomi-code-graph-search web stop` followed by `atomi-code-graph-search web start`.
 
 The dashboard has **no authentication** and listens only on localhost. Anyone able to access your local browser or this host's loopback port can use it, including adding paths that the server process can read. Do not publish or proxy its port to the Internet. The browser page and scripts are served by this package; no external assets are loaded.
 
@@ -64,13 +64,32 @@ Use a full path when two registered repositories have the same directory name. `
 
 The HTTP server listens only on `127.0.0.1:8765` at `/mcp`; change its port with `atomi-code-graph-search mcp start --port 9000`. It runs in the background and writes `~/.atomi-code-graph-search/mcp.log`. The `stop` command only stops the server started with the same database location. This local HTTP endpoint has no authentication; do not expose it to a network.
 
-For a client that launches MCP over stdio (such as Claude Code), use the client command directly:
+## Connect Claude Code via MCP
 
-```sh
-claude mcp add atomi-code-graph-search -- atomi-code-graph-search mcp stdio
+Run these commands on the same machine and in the same Python environment as Claude Code. Install the MCP extra and add a repository first.
+
+**Windows Command Prompt or PowerShell**
+
+```bat
+python -m pip install -e ".[mcp]"
+atomi-code-graph-search add "C:\dev\repo\my-project"
+claude mcp add --scope user --transport stdio atomi-code-graph-search -- atomi-code-graph-search mcp stdio
+claude mcp list
+claude mcp get atomi-code-graph-search
 ```
 
-The client starts and stops its own stdio process; `atomi-code-graph-search mcp stop` applies to the background HTTP server. MCP clients may transmit returned source snippets to their model provider.
+**Linux or macOS**
+
+```sh
+python -m pip install -e '.[mcp]'
+atomi-code-graph-search add /path/to/my-project
+claude mcp add --scope user --transport stdio atomi-code-graph-search -- atomi-code-graph-search mcp stdio
+claude mcp list
+```
+
+Start or restart Claude Code, run `/mcp`, then ask Claude to use `search_code`, `list_repositories`, or `source_graph`. The user scope makes it available in all your Claude Code projects. Claude starts its own stdio server, so `atomi-code-graph-search mcp start` is unnecessary for this setup; that command starts a separate localhost HTTP server. The dashboard (`web start`) is also independent. The default database is `~/.atomi-code-graph-search/index.sqlite3`. If you indexed with `--db`, register MCP with the same path using Claude's `--env CODE_INTEL_DB=...` option.
+
+If `claude mcp list` shows a failed connection, check that `atomi-code-graph-search mcp stdio` starts in the terminal where `claude` runs and that both commands use the same Windows or WSL Python installation. A manual stdio run waits for its client without printing a prompt; press Ctrl+C to exit. MCP clients may transmit returned source snippets to their model provider.
 
 ## Source graphs
 
@@ -87,4 +106,4 @@ MCP also provides `source_graph`. Call sites are parsed with bundled Tree-sitter
 
 Supported extensions include Python, Java, Kotlin, Go, Rust, C/C++, JavaScript, TypeScript, Vue, PHP, SQL, shell, common config and Markdown. Dependency/generated directories, symlinks, binary files and files larger than 1 MB are skipped. Source chunks are stored **in plain text** in the local SQLite database. Searches match any word and rank results using SQLite BM25. This does not prove coverage of all API endpoints or UI queries.
 
-Run `python -m unittest discover -s tests` to test. The software is provided under MIT; confirm the original archive's license rights before making the repository public.
+Run `python -m unittest discover -s tests` to test. The software is provided under the MIT license.

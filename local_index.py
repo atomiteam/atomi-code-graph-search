@@ -34,24 +34,42 @@ def iter_files(root, db_path):
             yield path
 
 
-def index(db, roots, db_path):
+def index(db, roots, db_path, progress=None):
     counts = {'updated': 0, 'unchanged': 0, 'removed': 0}
     for input_root in roots:
         root = Path(input_root).expanduser().resolve()
         if not root.is_dir():
             raise ValueError(f'Not a directory: {root}')
         seen = set()
+        paths = []
+        if progress:
+            progress('discovering', 0, 0, counts.copy())
+        for path in iter_files(root, Path(db_path).expanduser().resolve()):
+            paths.append(path)
+            if progress and len(paths) % 100 == 0:
+                progress('discovering', len(paths), 0, counts.copy())
+        if progress:
+            progress('indexing', 0, len(paths), counts.copy())
         with db:
-            for path in iter_files(root, Path(db_path).expanduser().resolve()):
+            for position, path in enumerate(paths, 1):
                 key = str(path)
                 seen.add(key)
-                data = path.read_bytes()
+                try:
+                    data = path.read_bytes()
+                except OSError:
+                    if progress:
+                        progress('indexing', position, len(paths), counts.copy())
+                    continue
                 if b'\0' in data[:8192]:
+                    if progress:
+                        progress('indexing', position, len(paths), counts.copy())
                     continue
                 digest = hashlib.sha256(data).hexdigest()
                 existing = db.execute('SELECT digest FROM files WHERE path=?', (key,)).fetchone()
                 if existing and existing[0] == digest:
                     counts['unchanged'] += 1
+                    if progress and (position % 10 == 0 or position == len(paths)):
+                        progress('indexing', position, len(paths), counts.copy())
                     continue
                 lines = data.decode('utf-8', errors='replace').splitlines()
                 db.execute('DELETE FROM chunks WHERE path=?', (key,))
@@ -62,6 +80,8 @@ def index(db, roots, db_path):
                         db.execute('INSERT INTO chunks(path,root,line,content) VALUES (?,?,?,?)', (key, str(root), start + 1, content))
                 db.execute('INSERT OR REPLACE INTO files VALUES (?,?,?)', (key, str(root), digest))
                 counts['updated'] += 1
+                if progress and (position % 10 == 0 or position == len(paths)):
+                    progress('indexing', position, len(paths), counts.copy())
             old = db.execute('SELECT path FROM files WHERE root=?', (str(root),)).fetchall()
             for (path,) in old:
                 if path not in seen:
@@ -70,7 +90,9 @@ def index(db, roots, db_path):
                     counts['removed'] += 1
             # Resolve imports against the complete set of indexed files, including unchanged files.
             from source_graph import rebuild
-            rebuild(db, root)
+            rebuild(db, root, progress=progress, counts=counts.copy())
+        if progress:
+            progress('complete', len(paths), len(paths), counts.copy())
     return counts
 
 

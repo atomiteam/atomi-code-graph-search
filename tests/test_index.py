@@ -5,6 +5,20 @@ from local_index import connect, index, search
 
 
 class IndexTest(unittest.TestCase):
+    def test_progress_reports_indexing_and_graph(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'repo'
+            root.mkdir()
+            (root / 'app.py').write_text('def run():\n    pass\n')
+            db_path = Path(tmp) / 'index.sqlite3'
+            events = []
+            with connect(db_path) as db:
+                index(db, [root], db_path, progress=lambda *event: events.append(event))
+            self.assertTrue(any(stage == 'indexing' and done == total == 1
+                                for stage, done, total, _ in events))
+            self.assertTrue(any(stage == 'building graph' for stage, *_ in events))
+            self.assertEqual(events[-1][0], 'complete')
+
     def test_update_delete_and_same_named_roots(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

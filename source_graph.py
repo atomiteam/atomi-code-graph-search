@@ -89,14 +89,19 @@ def extract(path, text, known, root):
     return sorted(imports), []
 
 
-def rebuild(db, root):
+def rebuild(db, root, progress=None, counts=None):
     root = str(Path(root).resolve())
     from call_parser import LANGUAGES, calls_in_file
     paths = {p for (p,) in db.execute('SELECT path FROM files WHERE root=?', (root,))}
     with db:
         db.execute('DELETE FROM edges WHERE root=?', (root,))
         db.execute('DELETE FROM calls WHERE root=?', (root,))
-        for path in sorted(paths):
+        graph_paths = sorted(p for p in paths if Path(p).suffix in LANGUAGES)
+        if progress:
+            progress('building graph', 0, len(graph_paths), counts or {})
+        for position, path in enumerate(graph_paths, 1):
+            if progress and (position % 10 == 0 or position == len(graph_paths)):
+                progress('building graph', position, len(graph_paths), counts or {})
             if Path(path).suffix not in LANGUAGES:
                 continue
             try:

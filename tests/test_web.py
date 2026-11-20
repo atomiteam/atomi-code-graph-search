@@ -31,6 +31,7 @@ class WebTest(unittest.TestCase):
                         break
                     time.sleep(.02)
                 self.assertEqual(status[0]['files'], 1)
+                self.assertEqual(status[0]['status'], 'ready')
                 self.assertIn(b'needleweb', urlopen(base + '/?q=needleweb', timeout=3).read())
                 self.assertIn(b'Source graph', urlopen(base + '/graph', timeout=3).read())
                 self.assertEqual(json.load(urlopen(base + '/api/graph?type=calls', timeout=3))['type'], 'calls')
