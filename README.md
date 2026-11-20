@@ -10,11 +10,21 @@ Requires Python 3.10+ with SQLite FTS5. From this directory:
 python -m pip install -e .
 ```
 
-For MCP support, install the optional dependency instead:
+For MCP support, install the optional dependency instead. Run this command from the repository directory:
+
+**Windows Command Prompt or PowerShell**
+
+```bat
+python -m pip install -e ".[mcp]"
+```
+
+**Linux or macOS**
 
 ```sh
 python -m pip install -e '.[mcp]'
 ```
+
+Windows Command Prompt does not treat single quotes as argument quotes. The pip upgrade notice is informational; upgrading pip is not required for this installation.
 
 ## Browser dashboard
 
@@ -41,7 +51,7 @@ The dashboard has **no authentication** and listens only on localhost. Anyone ab
 | Refresh all registered repositories | `atomi-code-graph-search refresh` |
 | Refresh one repository | `atomi-code-graph-search refresh repo-a` |
 | Refresh several repositories | `atomi-code-graph-search refresh repo-a repo-b` |
-| Search indexed code | `atomi-code-graph-search search 'device registration'` |
+| Search indexed code | `atomi-code-graph-search search "device registration"` |
 | Remove a repository and its index | `atomi-code-graph-search remove repo-a` |
 | Start a localhost web dashboard | `atomi-code-graph-search web start` |
 | Stop the web dashboard | `atomi-code-graph-search web stop` |
