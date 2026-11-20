@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from web_server import Dashboard
+from web_server import Dashboard, mcp_setup_html
 
 
 class WebTest(unittest.TestCase):
@@ -24,6 +24,10 @@ class WebTest(unittest.TestCase):
                 def post(route, values):
                     return urlopen(Request(base + route, data=urlencode(values).encode(), headers={'Origin': base}), timeout=3)
                 self.assertIn(b'Atomi Code Graph Search', urlopen(base, timeout=3).read())
+                dashboard = urlopen(base, timeout=3).read().decode()
+                self.assertIn('Connect Claude Code', dashboard)
+                self.assertIn('claude mcp add --scope user --transport stdio', dashboard)
+                self.assertIn(str(Path(tmp) / 'db.sqlite3'), dashboard)
                 post('/add', {'path': str(root)})
                 for _ in range(100):
                     status = json.load(urlopen(base + '/api/status', timeout=3))
@@ -45,3 +49,9 @@ class WebTest(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=3)
+
+    def test_mcp_instructions_escape_database_path(self):
+        with tempfile.TemporaryDirectory(prefix='index<&>') as tmp:
+            html = mcp_setup_html(str(Path(tmp) / 'index.sqlite3'))
+            self.assertIn('&lt;&amp;&gt;', html)
+            self.assertNotIn('index<&>', html)

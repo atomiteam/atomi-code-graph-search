@@ -3,6 +3,7 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import threading
 from urllib.parse import parse_qs, urlparse
@@ -122,6 +123,7 @@ class Handler(BaseHTTPRequestHandler):
         page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Atomi Code Graph Search</title><style>
 :root{font-family:system-ui,sans-serif;color:#243047;background:#f6f8fb}*{box-sizing:border-box}main{max-width:1050px;margin:auto;padding:30px 18px}h1{margin-bottom:4px}p{color:#64748b}section{background:white;border:1px solid #e3e8f0;border-radius:14px;padding:22px;margin:22px 0;box-shadow:0 3px 14px #1d355708}form.inline,td form{display:inline-block;margin-right:6px}input{border:1px solid #cbd5e1;border-radius:8px;padding:10px;font:inherit;width:min(100%,540px)}button{border:0;border-radius:8px;background:#286ad1;color:white;padding:10px 15px;cursor:pointer;font-weight:600}.subtle{background:#e7edf5;color:#334155}table{border-collapse:collapse;width:100%}td,th{text-align:left;border-bottom:1px solid #edf1f5;padding:13px 8px;vertical-align:middle}td small{display:block;color:#64748b;word-break:break-all}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f7f9fc;padding:12px;border-radius:7px}li{margin:15px 0;overflow-wrap:anywhere}@media(max-width:700px){td{display:block}thead{display:none}tr{display:block;border-bottom:1px solid #ddd}}
 </style><main><h1>Atomi Code Graph Search</h1><p>Browse and refresh code on this machine. <a href='/graph'>Explore source graph →</a></p><section><h2>Repositories</h2><form method="post" action="/add"><label for="path">Repository directory</label><br><input required id="path" name="path" placeholder="C:\\dev\\repo\\my-repo"> <button>Add and index</button></form><p>Enter a directory accessible to this computer.</p><form method="post" action="/refresh-all"><button class="subtle">Refresh all</button></form><table><thead><tr><th>Repository</th><th>Index status</th><th>Actions</th></tr></thead><tbody>''' + (rows or '<tr><td colspan="3">No repositories added yet.</td></tr>') + '''</tbody></table></section><section><h2>Search code</h2><form method="get" action="/"><input name="q" value="''' + escape(query, quote=True) + '''" placeholder="Class, endpoint, SQL table…"> <button>Search</button></form><ul>''' + matches + '''</ul></section></main><script>async function status(){try{const r=await fetch('/api/status');if(!r.ok)return;const data=await r.json();for(const x of data){for(const el of document.querySelectorAll('.state'))if(el.dataset.path===x.path){const counts=x.counts||{};let detail=x.detail||'';if(x.status==='discovering')detail=x.processed+' files found';if(x.status==='indexing'||x.status==='building graph')detail=x.processed+' / '+x.total+' files · '+(x.total?Math.floor(100*x.processed/x.total):0)+'% · '+(counts.updated||0)+' updated · '+(counts.unchanged||0)+' unchanged';el.textContent=x.status+' · '+detail+(x.status==='ready'?' · '+x.files+' indexed files':'');}}}catch(e){}}status();setInterval(status,1500)</script></html>'''
+        page = page.replace('</main>', mcp_setup_html(self.server.db_path) + '</main>', 1)
         self._send(200, page, 'text/html; charset=utf-8')
 
     def do_POST(self):
@@ -177,6 +179,32 @@ def serve(db_path, port=8080):
         server.serve_forever()
     finally:
         server.server_close()
+
+
+def mcp_setup_html(db_path):
+    """Show Claude Code instructions tied to this dashboard's actual index."""
+    index_path = str(Path(db_path).expanduser().resolve())
+    install = 'python -m pip install -e ".[mcp]"' if os.name == 'nt' else "python -m pip install -e '.[mcp]'"
+    command = (
+        'claude mcp add --scope user --transport stdio atomi-code-graph-search '
+        f'-- atomi-code-graph-search --db "{index_path}" mcp stdio'
+    )
+    code = '\n'.join((install, command, 'claude mcp list', 'claude mcp get atomi-code-graph-search'))
+    platform = 'Windows Command Prompt or PowerShell' if os.name == 'nt' else 'Linux or macOS shell'
+    return (
+        '<section id="claude-mcp"><h2>Connect Claude Code</h2>'
+        '<p>Install the MCP extra from this project directory, then run these commands '
+        f'on this computer in {escape(platform)}. Add and index a repository above first.</p>'
+        f'<pre><code>{escape(code)}</code></pre>'
+        '<p>Start or restart Claude Code and use <code>/mcp</code> to check the connection. '
+        'Claude launches the stdio server when needed; you do not need to start the separate HTTP MCP server. '
+        'The commands above use this dashboard’s index database: '
+        f'<code>{escape(index_path)}</code>.</p>'
+        '<p>Once connected, ask Claude to use <code>search_code</code>, '
+        '<code>list_repositories</code>, or <code>source_graph</code>. '
+        '<a href="https://github.com/atomiteam/atomi-code-graph-search#connect-claude-code-via-mcp">Full setup guide</a>.</p>'
+        '</section>'
+    )
 
 
 def graph_page(paths):
