@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atomi-code-graph-search"
+version = "0.6.0"
+description = "Private local code indexing and keyword search with optional MCP"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "Atomi Code Graph Search contributors"}]
+dependencies = ["tree-sitter-language-pack==0.10.0"]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.26,<2"]
+
+[project.scripts]
+atomi-code-graph-search = "cli:main"
+
+[tool.setuptools]
+py-modules = ["cli", "local_index", "mcp_server", "web_server", "source_graph", "call_parser"]
