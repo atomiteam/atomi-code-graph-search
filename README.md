@@ -26,6 +26,8 @@ python -m pip install -e '.[mcp]'
 
 Windows Command Prompt does not treat single quotes as argument quotes. The pip upgrade notice is informational; upgrading pip is not required for this installation.
 
+After pulling new commits, rerun `python -m pip install -e ".[mcp]"` in the repository directory before restarting the dashboard. An editable install picks up source edits immediately, but pip must install new dependencies declared in `pyproject.toml` (such as `psutil`) separately. Use `python -m pip show psutil` to verify that the Python interpreter running the CLI has it.
+
 ## Browser dashboard
 
 After installing the CLI, launch the unauthenticated dashboard:

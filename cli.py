@@ -7,7 +7,10 @@ import signal
 import subprocess
 import sys
 import time
-import psutil
+try:
+    import psutil
+except ModuleNotFoundError:
+    psutil = None
 
 from local_index import connect, index, search
 
@@ -93,6 +96,11 @@ def web_pid_file(db_path):
 
 
 def managed_pid(db_path, service):
+    if psutil is None:
+        raise RuntimeError(
+            'Process management requires psutil. From the repository directory run: '
+            'python -m pip install -e ".[mcp]"'
+        )
     path = web_pid_file(db_path) if service == 'web' else pid_file(db_path)
     try:
         pid = int(path.read_text())
